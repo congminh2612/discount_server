@@ -7,6 +7,7 @@ import Attribute from './attribute.js';
 import AttributeValue from './attribute_value.js';
 import VariantValue from './variant_value.js';
 import Variant from './variant.js';
+import Discount from './discount.js';
 
 const setUpAssociations = () => {
   // Role - User (1-M)
@@ -44,6 +45,18 @@ const setUpAssociations = () => {
   // AttributeValue - VariantValue (1-M)
   AttributeValue.hasMany(VariantValue, { foreignKey: 'attribute_value_id', as: 'variant_value', onDelete: 'CASCADE' });
   VariantValue.belongsTo(AttributeValue, { foreignKey: 'attribute_value_id', as: 'attribute_value' });
+
+  // Discount - Product (1-M)
+  Product.hasMany(Discount, { foreignKey: 'apply_to_product_id', as: 'discounts', onDelete: 'CASCADE' });
+  Discount.belongsTo(Product, { foreignKey: 'apply_to_product_id', as: 'product' });
+
+  // Discount - Variant (1-M)
+  Variant.hasMany(Discount, { foreignKey: 'apply_to_variant_id', as: 'discounts', onDelete: 'CASCADE' });
+  Discount.belongsTo(Variant, { foreignKey: 'apply_to_variant_id', as: 'variant' });
+
+  // Discount - Category (1-M)
+  Category.hasMany(Discount, { foreignKey: 'apply_to_category_id', as: 'discounts', onDelete: 'CASCADE' });
+  Discount.belongsTo(Category, { foreignKey: 'apply_to_category_id', as: 'category' });
 };
 
 export default setUpAssociations;
