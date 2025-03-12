@@ -1,4 +1,4 @@
-import { CustomPricing } from '../../models/index.js';
+import { CustomPricing, Market, Product, User, Variant } from '../../models/index.js';
 import sequelize from '../../config/database.js';
 import { Op } from 'sequelize';
 
@@ -11,6 +11,28 @@ const getCPRules = async (req, res) => {
 
     const { rows: rules, count: total } = await CustomPricing.findAndCountAll({
       where: whereClause,
+      include: [
+        {
+          model: Product,
+          through: { attributes: [] },
+          as: 'products',
+        },
+        {
+          model: Variant,
+          through: { attributes: [] },
+          as: 'variants',
+        },
+        {
+          model: Market,
+          through: { attributes: [] },
+          as: 'markets',
+        },
+        {
+          model: User,
+          through: { attributes: [] },
+          as: 'customers',
+        },
+      ],
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [['createdAt', 'DESC']],
@@ -61,14 +83,6 @@ const createCPRule = async (req, res) => {
     start_date,
     end_date,
   } = req.body;
-  const rule = CustomPricing.build({
-    title,
-    description,
-    discount_type,
-    discount_value,
-    start_date,
-    end_date,
-  });
   const transaction = await sequelize.transaction();
 
   try {
@@ -78,7 +92,7 @@ const createCPRule = async (req, res) => {
     );
 
     if (market_ids.length) await rule.setMarkets(market_ids, { transaction });
-    if (customer_ids.length) await rule.setCustomers(customer_ids, { transaction });
+    if (customer_ids.length) await rule.setUsers(customer_ids, { transaction });
     if (variant_ids.length) await rule.setVariants(variant_ids, { transaction });
     if (product_ids.length) await rule.setProducts(product_ids, { transaction });
 

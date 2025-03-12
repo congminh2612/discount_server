@@ -1,4 +1,13 @@
-import { Attribute, AttributeValue, Product, sequelize, Variant, VariantValue } from '../../models/index.js';
+import {
+  Attribute,
+  AttributeValue,
+  CustomPricing,
+  Product,
+  sequelize,
+  User,
+  Variant,
+  VariantValue,
+} from '../../models/index.js';
 
 const formatProduct = (product) => {
   if (!product) return null;
@@ -57,6 +66,7 @@ const productIncludeOptions = [
 
 const getProduct = async (req, res) => {
   const { userId } = req.query;
+  console.log(userId);
 
   try {
     const products = await Product.findAll({
@@ -69,7 +79,7 @@ const getProduct = async (req, res) => {
 
     let pricingRules = [];
     if (userId) {
-      pricingRules = await CustomPricingRule.findAll({
+      pricingRules = await CustomPricing.findAll({
         include: [
           { model: User, where: { id: userId }, required: false },
           { model: Product, required: false },
