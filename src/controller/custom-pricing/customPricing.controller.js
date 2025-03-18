@@ -1,6 +1,7 @@
 import { CustomPricing, Market, Product, User, Variant } from '../../models/index.js';
 import sequelize from '../../config/database.js';
 import { Op } from 'sequelize';
+import { validationResult } from 'express-validator';
 
 const getCPRules = async (req, res) => {
   try {
@@ -71,6 +72,10 @@ const getCPRule = async (req, res) => {
 };
 
 const createCPRule = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
   const {
     title,
     description,
@@ -90,9 +95,8 @@ const createCPRule = async (req, res) => {
       { title, description, discount_type, discount_value, start_date, end_date },
       { transaction }
     );
-
     if (market_ids.length) await rule.setMarkets(market_ids, { transaction });
-    if (customer_ids.length) await rule.setUsers(customer_ids, { transaction });
+    if (customer_ids.length) await rule.setCustomers(customer_ids, { transaction });
     if (variant_ids.length) await rule.setVariants(variant_ids, { transaction });
     if (product_ids.length) await rule.setProducts(product_ids, { transaction });
 
@@ -123,7 +127,7 @@ const updateCPRule = async (req, res) => {
   } = req.body;
   const rule = await CustomPricing.findByPk(id);
   if (!rule) return res.status(404).json({ success: false, message: 'Not found' });
-  const transaction = await sequelize.transaction(); // Bắt đầu transaction
+  const transaction = await sequelize.transaction();
 
   try {
     const rule = await CustomPricing.findByPk(id);
