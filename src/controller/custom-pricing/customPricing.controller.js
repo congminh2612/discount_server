@@ -61,13 +61,47 @@ const getCPRules = async (req, res) => {
 const getCPRule = async (req, res) => {
   try {
     const { id } = req.params;
+
     const rule = await CustomPricing.findByPk(id, {
-      include: [Product, Variant, Market, User],
+      include: [
+        {
+          model: Product,
+          through: { attributes: [] },
+          as: 'products',
+        },
+        {
+          model: Variant,
+          through: { attributes: [] },
+          as: 'variants',
+        },
+        {
+          model: Market,
+          through: { attributes: [] },
+          as: 'markets',
+        },
+        {
+          model: User,
+          through: { attributes: [] },
+          as: 'customers',
+        },
+      ],
     });
-    if (!rule) return res.status(404).json({ success: false, message: 'Not found' });
-    return res.status(200).json({ success: true, data: rule });
+
+    if (!rule) {
+      return res.status(404).json({ success: false, message: 'Custom pricing rule not found' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Custom pricing rule retrieved successfully',
+      data: rule,
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Error retrieving custom pricing rule',
+      error: error.message,
+    });
   }
 };
 
@@ -118,54 +152,50 @@ const updateCPRule = async (req, res) => {
     description,
     discount_type,
     discount_value,
-    market_ids,
-    customer_ids,
-    variant_ids,
-    product_ids,
+    market_ids = [],
+    customer_ids = [],
+    variant_ids = [],
+    product_ids = [],
     start_date,
     end_date,
   } = req.body;
+
   const rule = await CustomPricing.findByPk(id);
-  if (!rule) return res.status(404).json({ success: false, message: 'Not found' });
+  if (!rule) return res.status(404).json({ success: false, message: 'Custom pricing rule not found' });
+
   const transaction = await sequelize.transaction();
-
   try {
-    const rule = await CustomPricing.findByPk(id);
-    if (!rule) {
-      return res.status(404).json({ success: false, message: 'Custom pricing rule not found' });
+    const updates = {};
+    if (title !== undefined && title !== rule.title) updates.title = title;
+    if (description !== undefined && description !== rule.description) updates.description = description;
+    if (discount_type !== undefined && discount_type !== rule.discount_type) updates.discount_type = discount_type;
+    if (discount_value !== undefined && discount_value !== rule.discount_value) updates.discount_value = discount_value;
+    if (start_date !== undefined && start_date !== rule.start_date) updates.start_date = start_date;
+    if (end_date !== undefined && end_date !== rule.end_date) updates.end_date = end_date;
+
+    if (Object.keys(updates).length) {
+      await rule.update(updates, { transaction });
     }
-    const transaction = await sequelize.transaction();
 
-    try {
-      if (title !== undefined) rule.title = title;
-      if (description !== undefined) rule.description = description;
-      if (discount_type !== undefined) rule.discount_type = discount_type;
-      if (discount_value !== undefined) rule.discount_value = discount_value;
-      if (start_date !== undefined) rule.start_date = start_date;
-      if (end_date !== undefined) rule.end_date = end_date;
+    if (market_ids !== undefined) await rule.setMarkets(market_ids, { transaction });
+    if (customer_ids !== undefined) await rule.setCustomers(customer_ids, { transaction });
+    if (variant_ids !== undefined) await rule.setVariants(variant_ids, { transaction });
+    if (product_ids !== undefined) await rule.setProducts(product_ids, { transaction });
 
-      await rule.save({ transaction });
+    await transaction.commit();
 
-      if (market_ids !== undefined) await rule.setMarkets(market_ids, { transaction });
-      if (customer_ids !== undefined) await rule.setCustomers(customer_ids, { transaction });
-      if (variant_ids !== undefined) await rule.setVariants(variant_ids, { transaction });
-      if (product_ids !== undefined) await rule.setProducts(product_ids, { transaction });
-
-      await transaction.commit();
-
-      return res.status(200).json({
-        success: true,
-        message: 'Custom pricing rule updated successfully',
-        data: rule,
-      });
-    } catch (error) {
-      await transaction.rollback();
-      return res
-        .status(500)
-        .json({ success: false, message: 'Error updating custom pricing rule', error: error.message });
-    }
+    return res.status(200).json({
+      success: true,
+      message: 'Custom pricing rule updated successfully',
+      data: rule,
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+    await transaction.rollback();
+    return res.status(500).json({
+      success: false,
+      message: 'Error updating custom pricing rule',
+      error: error.message,
+    });
   }
 };
 

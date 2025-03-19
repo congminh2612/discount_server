@@ -1,6 +1,7 @@
 import {
   Attribute,
   AttributeValue,
+  Category,
   CustomPricing,
   Product,
   sequelize,
@@ -65,14 +66,27 @@ const productIncludeOptions = [
 ];
 
 const getProduct = async (req, res) => {
-  const { userId } = req.query;
+  const { userId, page = 1, limit = 10, search, categoryId } = req.query;
+  console.log('🚀 ~ getProduct ~ categoryId:', categoryId);
 
   try {
-    const products = await Product.findAll({
-      include: productIncludeOptions,
+    const whereCondition = {};
+    if (search) {
+      whereCondition.name = { [Op.iLike]: `%${search}%` };
+    }
+    if (categoryId) {
+      whereCondition.category_id = categoryId;
+    }
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { count, rows: products } = await Product.findAndCountAll({
+      where: whereCondition,
+      include: [{ model: Category, as: 'category', attributes: ['id', 'name'] }, ...productIncludeOptions],
+      limit: parseInt(limit),
+      offset: offset,
     });
 
-    if (!products || products.length === 0) {
+    if (!products.length) {
       return res.status(404).json({ success: false, message: 'No products found' });
     }
 
@@ -80,31 +94,51 @@ const getProduct = async (req, res) => {
     if (userId) {
       pricingRules = await CustomPricing.findAll({
         include: [
-          { model: User, where: { id: userId }, required: false },
-          { model: Product, required: false },
+          { model: User, as: 'customers', where: { id: userId }, required: false },
+          { model: Product, as: 'products', required: false },
         ],
       });
     }
     const updatedProducts = products.map((product) => {
-      let discount = 0;
-      let appliedRule = null;
+      let bestRule = null;
+      let maxDiscount = 0;
 
       pricingRules.forEach((rule) => {
-        if (rule.Products.some((p) => p.id === product.id)) {
-          appliedRule = rule;
+        if (rule.products.some((p) => p.id === product.id)) {
+          let discount = 0;
+
           if (rule.discount_type === 'percentage') {
             discount = (rule.discount_value / 100) * product.original_price;
           } else if (rule.discount_type === 'fixed') {
             discount = rule.discount_value;
           }
+
+          if (discount > maxDiscount) {
+            maxDiscount = discount;
+            bestRule = rule;
+          }
         }
       });
 
-      return {
-        ...formatProduct(product),
+      const formattedProduct = formatProduct({
+        ...product.toJSON(),
         original_price: product.original_price,
-        discountPercentage: appliedRule ? appliedRule.discount_value : 0,
-        final_price: Math.max(product.original_price - discount, 0),
+        final_price: Math.max(product.original_price - maxDiscount, 0),
+      });
+
+      return {
+        ...formattedProduct,
+        discountPercentage: bestRule ? bestRule.discount_value : 0,
+        appliedRule: bestRule
+          ? {
+              id: bestRule.id,
+              name: bestRule.name,
+              discount_type: bestRule.discount_type,
+              discount_value: bestRule.discount_value,
+              start_date: bestRule.start_date,
+              end_date: bestRule.end_date,
+            }
+          : null,
       };
     });
 
@@ -112,6 +146,12 @@ const getProduct = async (req, res) => {
       success: true,
       message: 'Get products successfully',
       data: updatedProducts,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
