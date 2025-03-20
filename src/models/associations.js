@@ -17,6 +17,11 @@ import CartItem from './cart_item.js';
 import Cart from './cart.js';
 import Address from './address.js';
 import PriceHistory from './price_history.js';
+import QuantityBreak from './quantity_break.js';
+import QBCustomer from './qb_customer.js';
+import QBMarket from './qb_market.js';
+import QBProduct from './qb_product.js';
+import QBVariant from './qb_variant.js';
 
 const setUpAssociations = () => {
   // Role - User (1-M)
@@ -218,6 +223,74 @@ const setUpAssociations = () => {
   PriceHistory.belongsTo(User, {
     foreignKey: 'changed_by',
     as: 'user',
+  });
+
+  // QuantityBreak - User (M-M)
+  QuantityBreak.belongsToMany(User, {
+    through: QBCustomer,
+    foreignKey: 'quantity_break_id',
+    otherKey: 'customer_id',
+    as: 'customers',
+    onDelete: 'CASCADE',
+  });
+
+  User.belongsToMany(QuantityBreak, {
+    through: QBCustomer,
+    foreignKey: 'customer_id',
+    otherKey: 'quantity_break_id',
+    as: 'quantity_breaks',
+    onDelete: 'CASCADE',
+  });
+
+  // QuantityBreak - Market (M-M)
+  QuantityBreak.belongsToMany(Market, {
+    through: QBMarket,
+    foreignKey: 'quantity_break_id',
+    otherKey: 'market_id',
+    as: 'markets',
+    onDelete: 'CASCADE',
+  });
+
+  Market.belongsToMany(QuantityBreak, {
+    through: QBMarket,
+    foreignKey: 'market_id',
+    otherKey: 'quantity_break_id',
+    as: 'quantity_breaks',
+    onDelete: 'CASCADE',
+  });
+
+  // QuantityBreak - Product (M-M)
+  QuantityBreak.belongsToMany(Product, {
+    through: QBProduct,
+    foreignKey: 'quantity_break_id',
+    otherKey: 'product_id',
+    as: 'products',
+    onDelete: 'CASCADE',
+  });
+
+  Product.belongsToMany(QuantityBreak, {
+    through: QBProduct,
+    foreignKey: 'product_id',
+    otherKey: 'quantity_break_id',
+    as: 'quantity_breaks',
+    onDelete: 'CASCADE',
+  });
+
+  // QuantityBreak - Variant (M-M)
+  QuantityBreak.belongsToMany(Variant, {
+    through: QBVariant,
+    foreignKey: 'quantity_break_id',
+    otherKey: 'variant_id',
+    as: 'variants',
+    onDelete: 'CASCADE',
+  });
+
+  Variant.belongsToMany(QuantityBreak, {
+    through: QBVariant,
+    foreignKey: 'variant_id',
+    otherKey: 'quantity_break_id',
+    as: 'quantity_breaks',
+    onDelete: 'CASCADE',
   });
 };
 
