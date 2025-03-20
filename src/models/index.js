@@ -15,6 +15,10 @@ import CustomPricingCustomer from './cp_customer.js';
 import CustomPricingMarket from './cp_market.js';
 import CustomPricingProduct from './cp_product.js';
 import CustomPricingVariant from './cp_variant.js';
+import Cart from './cart.js';
+import CartItem from './cart_item.js';
+import Address from './address.js';
+import PriceHistory from './price_history.js';
 
 setUpAssociations();
 
@@ -35,4 +39,8 @@ export {
   CustomPricingMarket,
   CustomPricingProduct,
   CustomPricingVariant,
+  Cart,
+  CartItem,
+  Address,
+  PriceHistory,
 };
