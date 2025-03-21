@@ -69,7 +69,7 @@ const getVariantPriceHistory = async (req, res) => {
         {
           model: User,
           as: 'user',
-          attributes: ['id', 'username'],
+          attributes: ['id', 'name'],
         },
       ],
     });
