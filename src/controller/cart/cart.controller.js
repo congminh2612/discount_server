@@ -99,7 +99,15 @@ const calculatePrice = async (userId, productId, variantId = null, transaction =
 
 export const getCart = async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false, 
+        message: 'UserId is required'
+      });
+    }
+
     const [cart, created] = await Cart.findOrCreate({
       where: { user_id: userId, status: 'active' },
       defaults: {
@@ -163,7 +171,7 @@ export const getCart = async (req, res) => {
         total_amount: cart.total_amount,
         shipping_address: shippingAddress,
         note: cart.note,
-        created_at: cart.created_at,
+        created_at: cart.createdAt,
       },
     });
   } catch (error) {
