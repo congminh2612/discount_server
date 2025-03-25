@@ -99,7 +99,11 @@ const calculatePrice = async (userId, productId, variantId = null, transaction =
 
 export const getCart = async (req, res) => {
   try {
-    const { userId } = req.body;
+    const userId = req.user?.id;
+if (!userId) {
+  return res.status(401).json({ success: false, message: 'Không tìm thấy thông tin người dùng' });
+}
+
     const [cart, created] = await Cart.findOrCreate({
       where: { user_id: userId, status: 'active' },
       defaults: {
@@ -126,7 +130,7 @@ export const getCart = async (req, res) => {
         {
           model: Variant,
           as: 'variant',
-          attributes: ['id', 'sku', 'final_price', 'original_price', 'stock_quantity'],
+          attributes: ['id', 'sku', 'final_price', 'original_price', 'stock_quantity', 'image_url'], 
         },
       ],
     });
@@ -369,7 +373,7 @@ export const updateCartItem = async (req, res) => {
 
   try {
     const userId = req.user.id;
-    const { cart_item_id } = req.params;
+    const { id: cart_item_id } = req.params;
     const { quantity } = req.body;
 
     if (!quantity && quantity !== 0) {
@@ -488,7 +492,7 @@ export const removeFromCart = async (req, res) => {
 
   try {
     const userId = req.user.id;
-    const { cart_item_id } = req.params;
+    const { id: cart_item_id } = req.params;
 
     const cart = await Cart.findOne({
       where: { user_id: userId, status: 'active' },
