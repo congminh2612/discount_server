@@ -184,7 +184,7 @@ export const addToCart = async (req, res) => {
   const transaction = await sequelize.transaction();
 
   try {
-    const userId = req.body.user.id;
+    const userId = req.user.id; 
     const { product_id, variant_id, quantity = 1 } = req.body;
 
     if (!product_id) {

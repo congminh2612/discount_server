@@ -1,5 +1,5 @@
 import admin from '../config/firebase.config.js';
-import { User } from '../models/index.js'; 
+import { User } from '../models/index.js';
 
 const verifyFirebaseToken = async (req, res, next) => {
   try {
@@ -12,8 +12,8 @@ const verifyFirebaseToken = async (req, res, next) => {
     const decodedToken = await admin.auth().verifyIdToken(idToken);
 
     const userRecord = await User.findOne({
-      where: {
-        firebase_uid: decodedToken.uid, 
+      where: { 
+        firebase_uid: decodedToken.uid
       },
     });
 
@@ -22,7 +22,7 @@ const verifyFirebaseToken = async (req, res, next) => {
     }
 
     req.user = {
-      id: userRecord.id, 
+      id: userRecord.id,
       uid: decodedToken.uid,
       email: decodedToken.email,
       username: decodedToken.name || decodedToken.email.split('@')[0],
@@ -30,9 +30,10 @@ const verifyFirebaseToken = async (req, res, next) => {
       avatar: decodedToken.picture || null,
     };
 
+    console.log('[Middleware] ✅ Xác thực thành công. User ID:', req.user.id);
     next();
   } catch (error) {
-    console.error('Lỗi xác thực Firebase:', error);
+    console.error('[Middleware] ❌ Lỗi xác thực Firebase:', error.message);
     return res.status(403).json({ message: 'Token không hợp lệ', error: error.message });
   }
 };
