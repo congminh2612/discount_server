@@ -12,6 +12,7 @@ import priceHistoryRouter from './router/priceHistory.js';
 import qbRouter from './router/qb.js';
 import cartRouter from './router/cart.js';
 import orderRouter from './router/order.js';
+import addressRouter from './router/address.js';
 
 const app = express();
 
@@ -39,5 +40,6 @@ app.use('/api/price-history', priceHistoryRouter);
 app.use('/api/qb', qbRouter);
 app.use('/api/cart', cartRouter);
 app.use('/api/order', orderRouter);
+app.use('/api/address', addressRouter);
 
 export default app;

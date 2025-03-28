@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, User, Address, Product, Variant, Delivery, OrderItem, Discount } from '../../models/index.js';
+import { Order, User, Address, Product, Variant, Delivery, OrderItem, Discount, sequelize } from '../../models/index.js';
 
 export const getOrders = async (req, res) => {
   try {
