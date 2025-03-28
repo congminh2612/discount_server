@@ -106,6 +106,7 @@ const Order = sequelize.define(
   },
   {
     tableName: 'order',
+    freezeTableName: true,
     timestamps: true,
     underscored: true,
     hooks: {
