@@ -17,7 +17,8 @@ const User = sequelize.define(
     },
     email: {
       type: DataTypes.STRING,
-      allowNull: false,
+      // allowNull: false,
+      allowNull: true,
       unique: true,
     },
     name: {
@@ -40,6 +41,10 @@ const User = sequelize.define(
         model: 'role',
         key: 'id',
       },
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
     },
   },
   {
