@@ -51,7 +51,7 @@ const processPayment = async (req, res) => {
     const expireDate = new Date(now.getTime() + 10 * 60 * 1000); // 10 phút
 
     const paymentUrl = vnpay.buildPaymentUrl({
-      vnp_Amount: Math.round(totalAmount * 100), // ✅ VNPay yêu cầu: giá trị × 100, không có dấu thập phân
+      vnp_Amount: Math.round(totalAmount),
       vnp_TxnRef: orderId.toString(),
       vnp_OrderInfo: `Thanh toán đơn hàng #${orderId}`,
       vnp_IpAddr: req.ip || req.connection.remoteAddress,
@@ -159,6 +159,7 @@ const repayment = async (req, res) => {
       vnp_CreateDate: dateFormat(now),
       vnp_ExpireDate: dateFormat(expireDate),
     });
+    console.log('[VNPay] totalAmount:', totalAmount);
 
     return res.status(200).json({
       success: true,

@@ -319,7 +319,8 @@ export const createOrder = async (req, res) => {
           });
         }
     
-        const priceData = await calculatePrice(req.user.id, product_id, variant_id, transaction);
+        const priceData = await calculatePrice(req.user.id, product_id, variant_id, quantity, transaction);
+
         unitPrice = priceData.finalPrice;
         originalPrice = priceData.originalPrice;
         sku = variant.sku;
@@ -332,7 +333,7 @@ export const createOrder = async (req, res) => {
           });
         }
     
-        const priceData = await calculatePrice(req.user.id, product_id, null, transaction);
+        const priceData = await calculatePrice(req.user.id, product_id, null, quantity, transaction);
         unitPrice = priceData.finalPrice;
         originalPrice = priceData.originalPrice;
       }

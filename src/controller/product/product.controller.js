@@ -10,6 +10,7 @@ import {
   VariantValue,
 } from '../../models/index.js';
 import { Op } from 'sequelize';
+import { calculatePrice } from '../../util/calculatePrice.js';
 
 const formatProduct = (product) => {
   if (!product) return null;
@@ -68,7 +69,9 @@ const productIncludeOptions = [
 ];
 
 const getProduct = async (req, res) => {
-  const { userId, page = 1, limit = 10, search, categoryId } = req.query;
+  const { page = 1, limit = 10, search, categoryId } = req.query;
+  const userId = req.user?.id; // 👉 ID thật trong bảng user
+  console.log('>>> req.user:', req.user); // 👈 kiểm tra req.user có tồn tại không
 
   try {
     const whereCondition = {};
@@ -93,6 +96,8 @@ const getProduct = async (req, res) => {
 
     let pricingRules = [];
     if (userId) {
+      console.log('>>> Fetching pricing rules for userId:', userId);
+
       pricingRules = await CustomPricing.findAll({
         where: {
           [Op.or]: [{ is_price_list: false }, { is_price_list: true }],
@@ -113,8 +118,22 @@ const getProduct = async (req, res) => {
           },
         ],
         raw: false,
+      
       });
+      console.log('>>> Pricing Rules FOUND:', pricingRules.length); // 👈 kiểm tra số lượng
+      console.log('>>> Pricing Rules FULL:', JSON.stringify(pricingRules, null, 2));
 
+      console.log('User ID:', userId);
+      console.log('Pricing Rules:', pricingRules.map(r => ({
+        id: r.id,
+        is_price_list: r.is_price_list,
+        discount_type: r.discount_type,
+        discount_value: r.discount_value,
+        customers: r.customers?.map(c => c.id),
+        products: r.products?.map(p => p.id),
+        variants: r.variants?.map(v => v.id),
+      })));
+      
       // Convert amounts
       pricingRules.forEach((rule) => {
         rule.amounts = [];
@@ -177,12 +196,12 @@ const getProduct = async (req, res) => {
 
       // ✅ Áp dụng Custom Pricing (discount)
       pricingRules.forEach((rule) => {
-        if (!rule.is_price_list && rule.products?.some(p => p.id === productJSON.id)) {
+        if (!productJSON.has_variant && !rule.is_price_list && rule.products?.some(p => p.id === productJSON.id)) {
           let discount = 0;
 
           if (rule.discount_type === 'percentage') {
             discount = (rule.discount_value / 100) * computedOriginalPrice;
-          } else if (rule.discount_type === 'fixed') {
+          } else if (rule.discount_type === 'fixed price') {
             discount = rule.discount_value;
           }
 
@@ -224,9 +243,6 @@ const getProduct = async (req, res) => {
 };
 
 
-
-
-
 const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -262,8 +278,8 @@ const getProductById = async (req, res) => {
           {
             model: User,
             as: 'customers',
-            where: { id: userId },
-            required: false,
+            where: userId ? { id: userId } : undefined,
+            required: !!userId,
           },
           {
             model: Product,
@@ -328,15 +344,15 @@ const getProductById = async (req, res) => {
 
       // ✅ Áp dụng Custom Pricing
       pricingRules.forEach((rule) => {
-        if (!rule.is_price_list && rule.products?.some(p => p.id === productJSON.id)) {
+        if (!rule.is_price_list && !productJSON.has_variant && rule.products?.some(p => p.id === productJSON.id)) {
           let discount = 0;
-
+      
           if (rule.discount_type === 'percentage') {
             discount = (rule.discount_value / 100) * computedOriginalPrice;
-          } else if (rule.discount_type === 'fixed') {
+          } else if (rule.discount_type === 'fixed price') {
             discount = rule.discount_value;
           }
-
+      
           const discountedPrice = Math.max(computedOriginalPrice - discount, 0);
           if (discountedPrice < computedFinalPrice) {
             computedFinalPrice = discountedPrice;
@@ -345,11 +361,22 @@ const getProductById = async (req, res) => {
       });
     }
 
-    const formattedProduct = formatProduct({
-      ...productJSON,
-      original_price: computedOriginalPrice,
-      final_price: computedFinalPrice,
-    });
+    const mainResult = await calculatePrice(userId, product.id, null, 1);
+    productJSON.original_price = mainResult.originalPrice;
+    productJSON.final_price = mainResult.finalPrice;
+    productJSON.appliedRule = mainResult.appliedRule;
+    
+    if (productJSON.has_variant && Array.isArray(productJSON.variants)) {
+      for (const variant of productJSON.variants) {
+        const variantResult = await calculatePrice(userId, product.id, variant.id, 1);
+        variant.original_price = variantResult.originalPrice;
+        variant.final_price = variantResult.finalPrice;
+        variant.appliedRule = variantResult.appliedRule;
+      }
+    }
+    
+    const formattedProduct = formatProduct(productJSON);
+    
 
     return res.status(200).json({
       success: true,

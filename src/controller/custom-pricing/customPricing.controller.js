@@ -139,7 +139,7 @@ const createCPRule = async (req, res) => {
     start_date,
     end_date,
     is_price_list = false,
-    amounts = [], // ✅ Danh sách giá tùy chỉnh (từ PLEditor)
+    amounts = [],
   } = req.body;
 
   const transaction = await sequelize.transaction();
@@ -149,8 +149,8 @@ const createCPRule = async (req, res) => {
       {
         title,
         description,
-        discount_type,
-        discount_value,
+        discount_type: is_price_list ? null : discount_type,
+        discount_value: is_price_list ? null : discount_value,
         start_date,
         end_date,
         is_price_list,
@@ -158,27 +158,28 @@ const createCPRule = async (req, res) => {
       { transaction }
     );
 
-    // Gán associations
     if (market_ids.length) await rule.setMarkets(market_ids, { transaction });
     if (customer_ids.length) await rule.setCustomers(customer_ids, { transaction });
 
-    // Gán sản phẩm có amount
-    for (const p of amounts.filter((x) => !x.variant_id)) {
-      if (p.amount == null || isNaN(p.amount)) continue; // 🛡️ tránh gán null
-      await rule.addProduct(p.product_id, {
-        through: { amount: p.amount },
-        transaction,
-      });
+    if (is_price_list) {
+      for (const p of amounts.filter((x) => !x.variant_id)) {
+        if (p.amount == null || isNaN(p.amount)) continue;
+        await rule.addProduct(p.product_id, {
+          through: { amount: p.amount },
+          transaction,
+        });
+      }
+      for (const v of amounts.filter((x) => !!x.variant_id)) {
+        if (v.amount == null || isNaN(v.amount)) continue;
+        await rule.addVariant(v.variant_id, {
+          through: { amount: v.amount },
+          transaction,
+        });
+      }
+    } else {
+      if (product_ids.length) await rule.setProducts(product_ids, { transaction });
+      if (variant_ids.length) await rule.setVariants(variant_ids, { transaction });
     }
-    
-    for (const v of amounts.filter((x) => !!x.variant_id)) {
-      if (v.amount == null || isNaN(v.amount)) continue; // 🛡️ tránh gán null
-      await rule.addVariant(v.variant_id, {
-        through: { amount: v.amount },
-        transaction,
-      });
-    }
-    
 
     await transaction.commit();
 
@@ -201,6 +202,7 @@ const createCPRule = async (req, res) => {
 
 
 
+
 const updateCPRule = async (req, res) => {
   const { id } = req.params;
   const {
@@ -215,6 +217,7 @@ const updateCPRule = async (req, res) => {
     start_date,
     end_date,
     is_price_list,
+    amounts = [],
   } = req.body;
 
   const rule = await CustomPricing.findByPk(id);
@@ -222,7 +225,6 @@ const updateCPRule = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Custom pricing rule not found' });
   }
 
-  // ✅ Validate nếu là custom pricing mà thiếu discount_type hoặc discount_value
   if (!is_price_list && (!discount_type || discount_value === undefined)) {
     return res.status(400).json({
       success: false,
@@ -231,43 +233,46 @@ const updateCPRule = async (req, res) => {
   }
 
   const transaction = await sequelize.transaction();
-  try {
-    const updates = {
-      title,
-      description,
-      discount_type: is_price_list ? null : discount_type,
-      discount_value: is_price_list ? null : discount_value,
-      start_date,
-      end_date,
-      is_price_list,
-    };
 
-    await rule.update(updates, { transaction });
+  try {
+    await rule.update(
+      {
+        title,
+        description,
+        discount_type: is_price_list ? null : discount_type,
+        discount_value: is_price_list ? null : discount_value,
+        start_date,
+        end_date,
+        is_price_list,
+      },
+      { transaction }
+    );
 
     if (market_ids !== undefined) await rule.setMarkets(market_ids, { transaction });
     if (customer_ids !== undefined) await rule.setCustomers(customer_ids, { transaction });
-// Clear old associations
-await rule.setVariants([], { transaction });
-await rule.setProducts([], { transaction });
 
-// Re-insert with amounts
-for (const p of req.body.amounts?.filter((x) => !x.variant_id) || []) {
-  if (p.amount == null || isNaN(p.amount)) continue;
-  await rule.addProduct(p.product_id, {
-    through: { amount: p.amount },
-    transaction,
-  });
-}
+    await rule.setVariants([], { transaction });
+    await rule.setProducts([], { transaction });
 
-for (const v of req.body.amounts?.filter((x) => !!x.variant_id) || []) {
-  if (v.amount == null || isNaN(v.amount)) continue;
-  await rule.addVariant(v.variant_id, {
-    through: { amount: v.amount },
-    transaction,
-  });
-}
-
-
+    if (is_price_list) {
+      for (const p of amounts.filter((x) => !x.variant_id)) {
+        if (p.amount == null || isNaN(p.amount)) continue;
+        await rule.addProduct(p.product_id, {
+          through: { amount: p.amount },
+          transaction,
+        });
+      }
+      for (const v of amounts.filter((x) => !!x.variant_id)) {
+        if (v.amount == null || isNaN(v.amount)) continue;
+        await rule.addVariant(v.variant_id, {
+          through: { amount: v.amount },
+          transaction,
+        });
+      }
+    } else {
+      if (product_ids.length) await rule.setProducts(product_ids, { transaction });
+      if (variant_ids.length) await rule.setVariants(variant_ids, { transaction });
+    }
 
     await transaction.commit();
 

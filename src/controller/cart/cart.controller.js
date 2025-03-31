@@ -14,6 +14,93 @@ import { Op } from 'sequelize';
 import { calculatePrice } from '../../util/calculatePrice.js';
 
 
+// export const getCart = async (req, res) => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) {
+//       return res.status(401).json({ success: false, message: 'Không tìm thấy thông tin người dùng' });
+//     }
+
+//     const [cart, created] = await Cart.findOrCreate({
+//       where: { user_id: userId, status: 'active' },
+//       defaults: {
+//         user_id: userId,
+//         status: 'active',
+//         subtotal: 0,
+//         total_amount: 0,
+//       },
+//     });
+
+//     let shippingAddress = null;
+//     if (cart.shipping_address_id) {
+//       shippingAddress = await Address.findByPk(cart.shipping_address_id);
+//     }
+
+//     const cartItems = await CartItem.findAll({
+//       where: { cart_id: cart.id },
+//       include: [
+//         {
+//           model: Product,
+//           as: 'product',
+//           attributes: ['id', 'name', 'image_url', 'final_price', 'original_price', 'has_variant', 'stock_quantity'],
+//         },
+//         {
+//           model: Variant,
+//           as: 'variant',
+//           attributes: ['id', 'sku', 'final_price', 'original_price', 'stock_quantity', 'image_url'],
+//         },
+//       ],
+//     });
+
+//     const formattedItems = cartItems.map((item) => {
+//       const productData = item.product;
+//       const variantData = item.variant;
+
+//       // 👉 Lấy original_price chuẩn để hiển thị giá gốc
+//       const originalPrice = variantData?.original_price || productData?.original_price || item.unit_price;
+
+//       return {
+//         id: item.id,
+//         product_id: item.product_id,
+//         variant_id: item.variant_id,
+//         name: productData?.name || '',
+//         image: variantData?.image_url || productData?.image_url,
+//         sku: variantData?.sku || null,
+//         quantity: item.quantity,
+//         stock_quantity: variantData?.stock_quantity || productData?.stock_quantity || 0,
+//         unit_price: item.unit_price,
+//         total_price: item.total_price,
+//         discount_code: item.discount_code,
+//         discount_amount: item.discount_amount || 0,
+//         original_price: originalPrice, // ✅ Bổ sung dòng này
+//       };
+//     });
+
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         id: cart.id,
+//         items: formattedItems,
+//         item_count: cartItems.length,
+//         subtotal: cart.subtotal,
+//         shipping_fee: cart.shipping_fee || 0,
+//         discount_amount: cart.applied_discount_amount || 0,
+//         total_amount: cart.total_amount,
+//         shipping_address: shippingAddress,
+//         note: cart.note,
+//         created_at: cart.createdAt,
+//       },
+//     });
+//   } catch (error) {
+//     console.error('Error getting cart:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Không thể lấy thông tin giỏ hàng',
+//       error: error.message,
+//     });
+//   }
+// };
+
 export const getCart = async (req, res) => {
   try {
     const userId = req.user?.id;
@@ -52,36 +139,54 @@ export const getCart = async (req, res) => {
       ],
     });
 
-    const formattedItems = cartItems.map((item) => {
-      const productData = item.product;
-      const variantData = item.variant;
+    // 🔁 Tính lại giá từng item
+    const formattedItems = await Promise.all(
+      cartItems.map(async (item) => {
+        const productData = item.product;
+        const variantData = item.variant;
+        const quantity = item.quantity;
 
-      return {
-        id: item.id,
-        product_id: item.product_id,
-        variant_id: item.variant_id,
-        name: productData.name,
-        image: variantData ? variantData.image_url : productData.image_url,
-        sku: variantData ? variantData.sku : null,
-        quantity: item.quantity,
-        stock_quantity: variantData ? variantData.stock_quantity : productData.stock_quantity,
-        unit_price: item.unit_price,
-        total_price: item.total_price,
-        discount_code: item.discount_code,
-        discount_amount: item.discount_amount || 0,
-      };
-    });
+        const priceData = await calculatePrice(userId, item.product_id, item.variant_id, quantity);
+
+        const originalPrice = variantData?.original_price || productData?.original_price || priceData.originalPrice;
+
+        return {
+          id: item.id,
+          product_id: item.product_id,
+          variant_id: item.variant_id,
+          name: productData?.name || '',
+          image: variantData?.image_url || productData?.image_url,
+          sku: variantData?.sku || null,
+          quantity,
+          stock_quantity: variantData?.stock_quantity || productData?.stock_quantity || 0,
+          unit_price: priceData.finalPrice,
+          total_price: priceData.finalPrice * quantity,
+          discount_code: priceData.appliedRule ? `RULE-${priceData.appliedRule.id}` : null,
+          discount_amount: priceData.discountAmount * quantity,
+          original_price: originalPrice,
+        };
+      })
+    );
+
+    // ✅ Cập nhật lại tổng giá trị giỏ hàng
+    const subtotal = formattedItems.reduce((sum, item) => sum + item.total_price, 0);
+    const totalDiscount = formattedItems.reduce((sum, item) => sum + item.discount_amount, 0);
+
+    cart.subtotal = subtotal;
+    cart.applied_discount_amount = totalDiscount;
+    cart.total_amount = subtotal;
+    await cart.save();
 
     res.status(200).json({
       success: true,
       data: {
         id: cart.id,
         items: formattedItems,
-        item_count: cartItems.length,
-        subtotal: cart.subtotal,
+        item_count: formattedItems.length,
+        subtotal: subtotal,
         shipping_fee: cart.shipping_fee || 0,
-        discount_amount: cart.applied_discount_amount || 0,
-        total_amount: cart.total_amount,
+        discount_amount: totalDiscount,
+        total_amount: subtotal,
         shipping_address: shippingAddress,
         note: cart.note,
         created_at: cart.createdAt,
@@ -166,7 +271,8 @@ export const addToCart = async (req, res) => {
         message: 'Số lượng sản phẩm trong kho không đủ',
       });
     }
-    const priceData = await calculatePrice(userId, product_id, variant_id, transaction);
+    const priceData = await calculatePrice(userId, product_id, variant_id, quantity, transaction);
+    console.log('🧾 priceData:', priceData);
 
     const [cart, created] = await Cart.findOrCreate({
       where: { user_id: userId, status: 'active' },
@@ -350,7 +456,7 @@ export const updateCartItem = async (req, res) => {
         });
       }
 
-      const priceData = await calculatePrice(userId, cartItem.product_id, cartItem.variant_id, transaction);
+      const priceData = await calculatePrice(userId, cartItem.product_id, cartItem.variant_id, quantity, transaction);
 
       await cartItem.update(
         {
