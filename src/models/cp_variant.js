@@ -24,6 +24,10 @@ const CustomPricingVariant = sequelize.define(
       onDelete: 'CASCADE',
       onUpdate: 'CASCADE',
     },
+    amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true, // Giá tùy chỉnh, có thể null nếu chưa đặt
+    },
   },
   {
     tableName: 'cp_variant',

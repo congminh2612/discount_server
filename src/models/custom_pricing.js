@@ -20,11 +20,11 @@ const CustomPricing = sequelize.define(
     },
     discount_type: {
       type: DataTypes.ENUM('decrement', 'percentage', 'fixed price'),
-      allowNull: false,
+      allowNull: true,
     },
     discount_value: {
       type: DataTypes.DECIMAL(10, 2),
-      allowNull: false,
+      allowNull: true,
     },
     start_date: {
       type: DataTypes.DATEONLY,
@@ -33,6 +33,11 @@ const CustomPricing = sequelize.define(
     end_date: {
       type: DataTypes.DATEONLY,
       allowNull: false,
+    },
+    is_price_list: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     },
   },
   {

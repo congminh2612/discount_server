@@ -9,6 +9,7 @@ import {
   Variant,
   VariantValue,
 } from '../../models/index.js';
+import { Op } from 'sequelize';
 
 const formatProduct = (product) => {
   if (!product) return null;
@@ -19,6 +20,7 @@ const formatProduct = (product) => {
     category_id: product.category_id,
     market_id: product.market_id,
     has_variant: product.has_variant,
+    sku: product.sku || '',
     original_price: product.original_price,
     final_price: product.final_price,
     stock_quantity: product.stock_quantity,
@@ -67,7 +69,6 @@ const productIncludeOptions = [
 
 const getProduct = async (req, res) => {
   const { userId, page = 1, limit = 10, search, categoryId } = req.query;
-  console.log('🚀 ~ getProduct ~ categoryId:', categoryId);
 
   try {
     const whereCondition = {};
@@ -93,52 +94,115 @@ const getProduct = async (req, res) => {
     let pricingRules = [];
     if (userId) {
       pricingRules = await CustomPricing.findAll({
+        where: {
+          [Op.or]: [{ is_price_list: false }, { is_price_list: true }],
+        },
         include: [
           { model: User, as: 'customers', where: { id: userId }, required: false },
-          { model: Product, as: 'products', required: false },
+          {
+            model: Product,
+            as: 'products',
+            required: false,
+            through: { attributes: ['amount'] },
+          },
+          {
+            model: Variant,
+            as: 'variants',
+            required: false,
+            through: { attributes: ['amount'] },
+          },
         ],
+        raw: false,
+      });
+
+      // Convert amounts
+      pricingRules.forEach((rule) => {
+        rule.amounts = [];
+
+        rule.products?.forEach((product) => {
+          if (product.CustomPricingProduct?.amount) {
+            rule.amounts.push({
+              product_id: product.id,
+              amount: parseFloat(product.CustomPricingProduct.amount),
+            });
+          }
+        });
+
+        rule.variants?.forEach((variant) => {
+          if (variant.CustomPricingVariant?.amount) {
+            rule.amounts.push({
+              variant_id: variant.id,
+              amount: parseFloat(variant.CustomPricingVariant.amount),
+            });
+          }
+        });
       });
     }
-    const updatedProducts = products.map((product) => {
-      let bestRule = null;
-      let maxDiscount = 0;
 
+    const updatedProducts = products.map((product) => {
+      const productJSON = product.toJSON();
+      let computedOriginalPrice = productJSON.original_price;
+      let computedFinalPrice = productJSON.final_price;
+
+      if (productJSON.has_variant && Array.isArray(productJSON.variants)) {
+        const variantOriginals = productJSON.variants.map(v => Number(v.original_price)).filter(n => !isNaN(n));
+        const variantFinals = productJSON.variants.map(v => Number(v.final_price)).filter(n => !isNaN(n));
+
+        if (variantOriginals.length > 0) computedOriginalPrice = Math.min(...variantOriginals);
+        if (variantFinals.length > 0) computedFinalPrice = Math.min(...variantFinals);
+      }
+
+      // ✅ Áp dụng Price List (amounts)
       pricingRules.forEach((rule) => {
-        if (rule.products.some((p) => p.id === product.id)) {
+        rule.amounts?.forEach((price) => {
+          if (!productJSON.has_variant && price.product_id === productJSON.id && !price.variant_id) {
+            computedFinalPrice = price.amount;
+          }
+
+          if (productJSON.has_variant && Array.isArray(productJSON.variants)) {
+            productJSON.variants.forEach((v) => {
+              const matched = rule.amounts.find((p) => p.variant_id === v.id);
+              if (matched) {
+                v.final_price = matched.amount;
+              }
+            });
+
+            const updatedFinals = productJSON.variants.map(v => Number(v.final_price)).filter(n => !isNaN(n));
+            if (updatedFinals.length > 0) {
+              computedFinalPrice = Math.min(...updatedFinals);
+            }
+          }
+        });
+      });
+
+      // ✅ Áp dụng Custom Pricing (discount)
+      pricingRules.forEach((rule) => {
+        if (!rule.is_price_list && rule.products?.some(p => p.id === productJSON.id)) {
           let discount = 0;
 
           if (rule.discount_type === 'percentage') {
-            discount = (rule.discount_value / 100) * product.original_price;
+            discount = (rule.discount_value / 100) * computedOriginalPrice;
           } else if (rule.discount_type === 'fixed') {
             discount = rule.discount_value;
           }
 
-          if (discount > maxDiscount) {
-            maxDiscount = discount;
-            bestRule = rule;
+          const discountedPrice = Math.max(computedOriginalPrice - discount, 0);
+          if (discountedPrice < computedFinalPrice) {
+            computedFinalPrice = discountedPrice;
           }
         }
       });
 
       const formattedProduct = formatProduct({
-        ...product.toJSON(),
-        original_price: product.original_price,
-        final_price: Math.max(product.original_price - maxDiscount, 0),
+        ...productJSON,
+        original_price: computedOriginalPrice,
+        final_price: computedFinalPrice,
       });
 
       return {
         ...formattedProduct,
-        discountPercentage: bestRule ? bestRule.discount_value : 0,
-        appliedRule: bestRule
-          ? {
-              id: bestRule.id,
-              name: bestRule.name,
-              discount_type: bestRule.discount_type,
-              discount_value: bestRule.discount_value,
-              start_date: bestRule.start_date,
-              end_date: bestRule.end_date,
-            }
-          : null,
+        discountPercentage: 0,
+        appliedRule: null,
       };
     });
 
@@ -154,14 +218,19 @@ const getProduct = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error('Error in getProduct:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+
+
+
+
 const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.query; // Thêm userId để check custom pricing
+    const { userId } = req.query;
 
     const product = await Product.findOne({
       where: { id },
@@ -172,80 +241,135 @@ const getProductById = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    // Xử lý custom pricing
-    let appliedRule = null;
-    let finalPrice = product.original_price;
+    const productJSON = product.toJSON();
+    let computedOriginalPrice = productJSON.original_price;
+    let computedFinalPrice = productJSON.final_price;
+
+    if (productJSON.has_variant && Array.isArray(productJSON.variants)) {
+      const variantOriginals = productJSON.variants.map(v => Number(v.original_price)).filter(n => !isNaN(n));
+      const variantFinals = productJSON.variants.map(v => Number(v.final_price)).filter(n => !isNaN(n));
+
+      if (variantOriginals.length > 0) computedOriginalPrice = Math.min(...variantOriginals);
+      if (variantFinals.length > 0) computedFinalPrice = Math.min(...variantFinals);
+    }
 
     if (userId) {
       const pricingRules = await CustomPricing.findAll({
+        where: {
+          [Op.or]: [{ is_price_list: false }, { is_price_list: true }],
+        },
         include: [
-          { model: User, as: 'customers', where: { id: userId }, required: false },
-          { model: Product, as: 'products', where: { id }, required: false },
+          {
+            model: User,
+            as: 'customers',
+            where: { id: userId },
+            required: false,
+          },
+          {
+            model: Product,
+            as: 'products',
+            required: false,
+            through: { attributes: ['amount'] },
+          },
+          {
+            model: Variant,
+            as: 'variants',
+            required: false,
+            through: { attributes: ['amount'] },
+          },
         ],
+        raw: false,
       });
 
-      // Tìm quy tắc giá phù hợp
-      let maxDiscount = 0;
       pricingRules.forEach((rule) => {
-        if (rule.products.some((p) => p.id === product.id)) {
+        rule.amounts = [];
+
+        rule.products?.forEach((product) => {
+          if (product.CustomPricingProduct?.amount) {
+            rule.amounts.push({
+              product_id: product.id,
+              amount: parseFloat(product.CustomPricingProduct.amount),
+            });
+          }
+        });
+
+        rule.variants?.forEach((variant) => {
+          if (variant.CustomPricingVariant?.amount) {
+            rule.amounts.push({
+              variant_id: variant.id,
+              amount: parseFloat(variant.CustomPricingVariant.amount),
+            });
+          }
+        });
+      });
+
+      // ✅ Áp dụng Price List (amounts)
+      pricingRules.forEach((rule) => {
+        rule.amounts?.forEach((price) => {
+          if (!productJSON.has_variant && price.product_id === productJSON.id && !price.variant_id) {
+            computedFinalPrice = price.amount;
+          }
+
+          if (productJSON.has_variant && Array.isArray(productJSON.variants)) {
+            productJSON.variants.forEach((v) => {
+              const matched = rule.amounts.find((p) => p.variant_id === v.id);
+              if (matched) {
+                v.final_price = matched.amount;
+              }
+            });
+
+            const updatedFinals = productJSON.variants.map(v => Number(v.final_price)).filter(n => !isNaN(n));
+            if (updatedFinals.length > 0) {
+              computedFinalPrice = Math.min(...updatedFinals);
+            }
+          }
+        });
+      });
+
+      // ✅ Áp dụng Custom Pricing
+      pricingRules.forEach((rule) => {
+        if (!rule.is_price_list && rule.products?.some(p => p.id === productJSON.id)) {
           let discount = 0;
 
           if (rule.discount_type === 'percentage') {
-            discount = (rule.discount_value / 100) * product.original_price;
+            discount = (rule.discount_value / 100) * computedOriginalPrice;
           } else if (rule.discount_type === 'fixed') {
             discount = rule.discount_value;
           }
 
-          if (discount > maxDiscount) {
-            maxDiscount = discount;
-            appliedRule = rule;
+          const discountedPrice = Math.max(computedOriginalPrice - discount, 0);
+          if (discountedPrice < computedFinalPrice) {
+            computedFinalPrice = discountedPrice;
           }
         }
       });
-
-      // Tính toán giá cuối cùng
-      finalPrice = Math.max(product.original_price - maxDiscount, 0);
     }
 
-    // Định dạng sản phẩm với giá cuối cùng
     const formattedProduct = formatProduct({
-      ...product.toJSON(),
-      original_price: product.original_price,
-      final_price: finalPrice,
+      ...productJSON,
+      original_price: computedOriginalPrice,
+      final_price: computedFinalPrice,
     });
-
-    // Thêm thông tin về quy tắc giá áp dụng
-    const responseData = {
-      ...formattedProduct,
-      discountPercentage: appliedRule ? appliedRule.discount_value : 0,
-      appliedRule: appliedRule
-        ? {
-            id: appliedRule.id,
-            name: appliedRule.name,
-            discount_type: appliedRule.discount_type,
-            discount_value: appliedRule.discount_value,
-            start_date: appliedRule.start_date,
-            end_date: appliedRule.end_date,
-          }
-        : null,
-    };
 
     return res.status(200).json({
       success: true,
       message: 'Product retrieved successfully',
-      data: responseData,
+      data: formattedProduct,
     });
   } catch (error) {
     console.error('Error in getProductById:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
   }
 };
 
+
+
+
 const createProduct = async (req, res) => {
-  let result = {
-    success: false,
-    message: 'Could not create product',
-  };
   const transaction = await sequelize.transaction();
 
   try {
@@ -255,6 +379,7 @@ const createProduct = async (req, res) => {
       category_id,
       market_id,
       has_variant,
+      sku,
       original_price,
       final_price,
       stock_quantity,
@@ -266,176 +391,55 @@ const createProduct = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    const newProduct = await Product.create(
-      {
-        name,
-        description,
-        category_id,
-        market_id,
-        has_variant,
-        original_price,
-        final_price,
-        stock_quantity: has_variant ? null : stock_quantity,
-        image_url,
-      },
-      { transaction }
-    );
+    // Kiểm tra SKU trùng nếu sản phẩm không có biến thể
+    if (!has_variant && sku) {
+      const existingSkuInProduct = await Product.findOne({ where: { sku }, transaction });
+      const existingSkuInVariant = await Variant.findOne({ where: { sku }, transaction });
 
-    if (has_variant && Array.isArray(variants) && variants.length > 0) {
+      if (existingSkuInProduct || existingSkuInVariant) {
+        return res.status(400).json({ success: false, message: `SKU "${sku}" đã tồn tại` });
+      }
+    }
+
+    // Kiểm tra SKU trùng nếu sản phẩm có biến thể
+    if (has_variant && Array.isArray(variants)) {
       for (const variant of variants) {
-        const { sku, original_price, final_price, stock_quantity, attributes, image_url: variantImage } = variant;
+        const existingSkuInProduct = await Product.findOne({ where: { sku: variant.sku }, transaction });
+        const existingSkuInVariant = await Variant.findOne({ where: { sku: variant.sku }, transaction });
 
-        if (!sku || !Array.isArray(attributes) || attributes.length === 0) {
-          await transaction.rollback();
-          return res.status(400).json({ success: false, message: 'Invalid variant data' });
-        }
-
-        const newVariant = await Variant.create(
-          {
-            product_id: newProduct.id,
-            sku,
-            original_price,
-            final_price,
-            stock_quantity,
-            image_url: variantImage || null,
-          },
-          { transaction }
-        );
-
-        for (const attr of attributes) {
-          const { name, value } = attr;
-          let [attribute] = await Attribute.findOrCreate({
-            where: { name },
-            transaction,
-          });
-
-          let [attributeValue] = await AttributeValue.findOrCreate({
-            where: { attribute_id: attribute.id, value },
-            transaction,
-          });
-
-          await VariantValue.create(
-            { variant_id: newVariant.id, attribute_value_id: attributeValue.id },
-            { transaction }
-          );
+        if (existingSkuInProduct || existingSkuInVariant) {
+          return res.status(400).json({ success: false, message: `SKU "${variant.sku}" đã tồn tại` });
         }
       }
     }
 
-    await transaction.commit();
-
-    const createdProduct = await Product.findOne({
-      where: { id: newProduct.id },
-      include: [
-        {
-          model: Variant,
-          as: 'variants',
-          include: [
-            {
-              model: VariantValue,
-              as: 'variant_value',
-              include: [
-                {
-                  model: AttributeValue,
-                  as: 'attribute_value',
-                  include: [{ model: Attribute, as: 'attribute' }],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: 'Product created successfully',
-      data: formatProduct(createdProduct),
-    });
-  } catch (error) {
-    await transaction.rollback();
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: error.message,
-    });
-  }
-};
-
-const updateProduct = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const { id } = req.params;
-    const {
+    // Tạo sản phẩm
+    const newProduct = await Product.create({
       name,
       description,
       category_id,
       market_id,
       has_variant,
-      original_price,
-      final_price,
-      stock_quantity,
+      sku: has_variant ? null : sku,
+      original_price: has_variant ? null : original_price,
+      final_price: has_variant ? null : final_price,
+      stock_quantity: has_variant ? null : stock_quantity,
       image_url,
-      variants,
-      change_reason,
-    } = req.body;
+    }, { transaction });
 
-    const product = await Product.findByPk(id, { include: productIncludeOptions });
-
-    if (!product) {
-      await transaction.rollback();
-      return res.status(404).json({ success: false, message: 'Product not found' });
-    }
-
-    const priceChanged =
-      (original_price !== undefined && original_price !== product.original_price) ||
-      (final_price !== undefined && final_price !== product.final_price);
-
-    await product.update(
-      {
-        name: name ?? product.name,
-        description: description ?? product.description,
-        category_id: category_id ?? product.category_id,
-        market_id: market_id ?? product.market_id,
-        has_variant: has_variant ?? product.has_variant,
-        original_price: original_price ?? product.original_price,
-        final_price: final_price ?? product.final_price,
-        stock_quantity: has_variant ? null : stock_quantity ?? product.stock_quantity,
-        image_url: image_url ?? product.image_url,
-      },
-      {
-        transaction,
-        user: req.user,
-        change_reason: change_reason || (priceChanged ? 'Cập nhật giá sản phẩm' : 'Cập nhật thông tin sản phẩm'),
-      }
-    );
-
+    // Nếu có biến thể thì tạo
     if (has_variant && Array.isArray(variants)) {
-      await Variant.destroy({ where: { product_id: id }, transaction });
-
       for (const variant of variants) {
         const { sku, original_price, final_price, stock_quantity, attributes, image_url: variantImage } = variant;
 
-        if (!sku || !Array.isArray(attributes) || attributes.length === 0) {
-          await transaction.rollback();
-          return res.status(400).json({ success: false, message: 'Invalid variant data' });
-        }
-
-        const newVariant = await Variant.create(
-          {
-            product_id: id,
-            sku,
-            original_price,
-            final_price,
-            stock_quantity,
-            image_url: variantImage || null,
-          },
-          {
-            transaction,
-            user: req.user,
-            change_reason: change_reason || 'Tạo biến thể mới',
-          }
-        );
+        const newVariant = await Variant.create({
+          product_id: newProduct.id,
+          sku,
+          original_price,
+          final_price,
+          stock_quantity,
+          image_url: variantImage || null,
+        }, { transaction });
 
         for (const attr of attributes) {
           const { name, value } = attr;
@@ -445,25 +449,198 @@ const updateProduct = async (req, res) => {
             transaction,
           });
 
-          await VariantValue.create(
-            { variant_id: newVariant.id, attribute_value_id: attributeValue.id },
-            { transaction }
-          );
+          await VariantValue.create({ variant_id: newVariant.id, attribute_value_id: attributeValue.id }, { transaction });
+        }
+      }
+
+      // Cập nhật giá từ biến thể
+      const validVariants = variants.filter(v =>
+        typeof v.original_price === 'number' && typeof v.final_price === 'number'
+      );
+      const minOriginalPrice = Math.min(...validVariants.map(v => v.original_price));
+      const minFinalPrice = Math.min(...validVariants.map(v => v.final_price));
+
+      await newProduct.update({ original_price: minOriginalPrice, final_price: minFinalPrice }, { transaction });
+    }
+
+    await transaction.commit();
+
+    const createdProduct = await Product.findOne({
+      where: { id: newProduct.id },
+      include: productIncludeOptions,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Product created successfully',
+      data: formatProduct(createdProduct),
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('Error in createProduct:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+const updateProduct = async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      description,
+      category_id,
+      market_id,
+      has_variant,
+      sku,
+      original_price,
+      final_price,
+      stock_quantity,
+      image_url,
+      variants,
+      change_reason,
+    } = req.body;
+
+    const product = await Product.findByPk(id, { transaction });
+
+    if (!product) {
+      await transaction.rollback();
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    // Kiểm tra SKU nếu sản phẩm không có biến thể
+    if (!has_variant && sku) {
+      const duplicateInProduct = await Product.findOne({ where: { sku, id: { [Op.ne]: id } }, transaction });
+      const duplicateInVariant = await Variant.findOne({ where: { sku }, transaction });
+
+      if (duplicateInProduct || duplicateInVariant) {
+        return res.status(400).json({ success: false, message: `SKU "${sku}" đã tồn tại` });
+      }
+    }
+
+    // Kiểm tra SKU trong các biến thể mới
+    if (has_variant && Array.isArray(variants)) {
+      for (const variant of variants) {
+        if (!variant.sku) continue;
+
+        const existingVariant = await Variant.findOne({
+          where: { sku: variant.sku },
+          transaction,
+        });
+
+        const variantBelongsToCurrent = existingVariant?.product_id === Number(id);
+
+        if (existingVariant && !variantBelongsToCurrent) {
+          return res.status(400).json({ success: false, message: `SKU "${variant.sku}" đã tồn tại` });
+        }
+
+        const duplicateInProduct = await Product.findOne({
+          where: { sku: variant.sku },
+          transaction,
+        });
+
+        if (duplicateInProduct) {
+          return res.status(400).json({ success: false, message: `SKU "${variant.sku}" đã tồn tại trong sản phẩm khác` });
+        }
+      }
+    }
+
+    const priceChanged =
+      (original_price !== undefined && original_price !== product.original_price) ||
+      (final_price !== undefined && final_price !== product.final_price);
+
+    await product.update({
+      name,
+      description,
+      category_id,
+      market_id,
+      has_variant,
+      sku: has_variant ? null : sku,
+      original_price,
+      final_price,
+      stock_quantity: has_variant ? null : stock_quantity,
+      image_url,
+    }, {
+      transaction,
+      user: req.user,
+      change_reason: change_reason || (priceChanged ? 'Cập nhật giá' : 'Cập nhật thông tin'),
+    });
+
+    // Update biến thể
+    if (has_variant && Array.isArray(variants)) {
+      for (const variant of variants) {
+        const { sku, original_price, final_price, stock_quantity, attributes, image_url: variantImage } = variant;
+
+        const existingVariant = await Variant.findOne({ where: { product_id: id, sku }, transaction });
+
+        if (existingVariant) {
+          await existingVariant.update({
+            original_price,
+            final_price,
+            stock_quantity,
+            image_url: variantImage ?? existingVariant.image_url,
+          }, { transaction });
+
+          await VariantValue.destroy({ where: { variant_id: existingVariant.id }, transaction });
+
+          for (const attr of attributes) {
+            const { name, value } = attr;
+            let [attribute] = await Attribute.findOrCreate({ where: { name }, transaction });
+            let [attributeValue] = await AttributeValue.findOrCreate({
+              where: { attribute_id: attribute.id, value },
+              transaction,
+            });
+
+            await VariantValue.create({
+              variant_id: existingVariant.id,
+              attribute_value_id: attributeValue.id,
+            }, { transaction });
+          }
+        } else {
+          const newVariant = await Variant.create({
+            product_id: id,
+            sku,
+            original_price,
+            final_price,
+            stock_quantity,
+            image_url: variantImage || null,
+          }, { transaction });
+
+          for (const attr of attributes) {
+            const { name, value } = attr;
+            let [attribute] = await Attribute.findOrCreate({ where: { name }, transaction });
+            let [attributeValue] = await AttributeValue.findOrCreate({
+              where: { attribute_id: attribute.id, value },
+              transaction,
+            });
+
+            await VariantValue.create({
+              variant_id: newVariant.id,
+              attribute_value_id: attributeValue.id,
+            }, { transaction });
+          }
         }
       }
     }
 
     await transaction.commit();
 
-    const updatedProduct = await Product.findOne({ where: { id }, include: productIncludeOptions });
+    const updatedProduct = await Product.findOne({
+      where: { id },
+      include: productIncludeOptions,
+    });
 
-    return res
-      .status(200)
-      .json({ success: true, message: 'Product updated successfully', data: formatProduct(updatedProduct) });
+    return res.status(200).json({
+      success: true,
+      message: 'Product updated successfully',
+      data: formatProduct(updatedProduct),
+    });
   } catch (error) {
     await transaction.rollback();
     console.error('Error in updateProduct:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
