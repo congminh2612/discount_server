@@ -32,7 +32,7 @@ import Delivery from './delivery.js';
 const setUpAssociations = () => {
   // Role - User (1-M)
   Role.hasMany(User, { foreignKey: 'role_id', onDelete: 'CASCADE' });
-  User.belongsTo(Role, { foreignKey: 'role_id' });
+  User.belongsTo(Role, { foreignKey: 'role_id', as: 'role' }); // 👈 thêm `as: 'role'`
 
   // Market - Product (1-M)
   Market.hasMany(Product, { foreignKey: 'market_id', onDelete: 'CASCADE' });
