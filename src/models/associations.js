@@ -32,7 +32,7 @@ import Delivery from './delivery.js';
 const setUpAssociations = () => {
   // Role - User (1-M)
   Role.hasMany(User, { foreignKey: 'role_id', onDelete: 'CASCADE' });
-  User.belongsTo(Role, { foreignKey: 'role_id' });
+  User.belongsTo(Role, { foreignKey: 'role_id', as: 'role' }); // 👈 thêm `as: 'role'`
 
   // Market - Product (1-M)
   Market.hasMany(Product, { foreignKey: 'market_id', onDelete: 'CASCADE' });
@@ -97,14 +97,14 @@ const setUpAssociations = () => {
   CustomPricing.belongsToMany(Product, {
     through: CustomPricingProduct,
     foreignKey: 'cp_id',
-    onDelete: 'CASCADE',
+    otherKey: 'product_id',
     as: 'products',
   });
 
   Product.belongsToMany(CustomPricing, {
     through: CustomPricingProduct,
     foreignKey: 'product_id',
-    onDelete: 'CASCADE',
+    otherKey: 'cp_id',
     as: 'cpRules',
   });
 
@@ -112,13 +112,13 @@ const setUpAssociations = () => {
   CustomPricing.belongsToMany(Variant, {
     through: CustomPricingVariant,
     foreignKey: 'cp_id',
-    onDelete: 'CASCADE',
+    otherKey: 'variant_id',
     as: 'variants',
   });
   Variant.belongsToMany(CustomPricing, {
     through: CustomPricingVariant,
     foreignKey: 'variant_id',
-    onDelete: 'CASCADE',
+    otherKey: 'cp_id',
     as: 'cpRules',
   });
   // User - Address (1-M)
@@ -368,5 +368,13 @@ const setUpAssociations = () => {
   Order.belongsTo(User, { foreignKey: 'updated_by', as: 'updatedByUser' });
   User.hasMany(Order, { foreignKey: 'updated_by', as: 'updatedOrders' });
 };
+
+// Gắn alias riêng biệt cho mỗi bảng phụ
+CustomPricing.hasMany(CustomPricingProduct, { foreignKey: 'cp_id', as: 'productAmounts', onDelete: 'CASCADE' });
+CustomPricingProduct.belongsTo(CustomPricing, { foreignKey: 'cp_id', as: 'pricingRule' });
+
+CustomPricing.hasMany(CustomPricingVariant, { foreignKey: 'cp_id', as: 'variantAmounts', onDelete: 'CASCADE' });
+CustomPricingVariant.belongsTo(CustomPricing, { foreignKey: 'cp_id', as: 'pricingRule' });
+
 
 export default setUpAssociations;

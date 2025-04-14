@@ -24,6 +24,10 @@ const CustomPricingProduct = sequelize.define(
       onDelete: 'CASCADE',
       onUpdate: 'CASCADE',
     },
+    amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true, // Cho phép null để tương thích khi chưa nhập
+    },
   },
   {
     tableName: 'cp_product',
