@@ -63,7 +63,7 @@ const Order = sequelize.define(
       onUpdate: 'CASCADE',
     },
     payment_method: {
-      type: DataTypes.ENUM('cod', 'bank_transfer', 'credit_card', 'paypal', 'momo', 'zalopay'),
+      type: DataTypes.ENUM('cod', 'bank_transfer', 'credit_card', 'paypal', 'momo', 'zalopay', 'vnpay'),
       allowNull: false,
       defaultValue: 'cod',
     },
@@ -106,6 +106,7 @@ const Order = sequelize.define(
   },
   {
     tableName: 'order',
+    freezeTableName: true,
     timestamps: true,
     underscored: true,
     hooks: {

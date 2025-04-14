@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Order, User, Address, Product, Variant, Delivery, OrderItem, Discount } from '../../models/index.js';
+import { Order, User, Address, Product, Variant, Delivery, OrderItem, Discount, sequelize } from '../../models/index.js';
 
 export const getOrders = async (req, res) => {
   try {
@@ -45,6 +45,7 @@ export const getOrders = async (req, res) => {
         {
           model: User,
           as: 'customer',
+          required: !!search,
           attributes: ['id', 'name', 'email', 'phone'],
         },
         {
@@ -143,6 +144,7 @@ export const getOrderById = async (req, res) => {
         },
         {
           model: Delivery,
+          as: 'delivery',
           attributes: [
             'id',
             'status',
@@ -187,10 +189,9 @@ export const getOrderById = async (req, res) => {
 
 export const createOrder = async (req, res) => {
   const transaction = await sequelize.transaction();
-
   try {
     const { items, shipping_address_id, billing_address_id, discount_code, payment_method, notes } = req.body;
-
+  
     const user_id = req.user.id;
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -414,8 +415,10 @@ export const createOrder = async (req, res) => {
 
     let totalAmount = subtotal + taxAmount + shippingFee - discountAmount;
     if (totalAmount < 0) totalAmount = 0;
+    const orderNumber = `ORD-${Date.now()}`;
     const order = await Order.create(
       {
+        order_number: orderNumber,
         user_id,
         status: 'pending',
         total_amount: totalAmount,
@@ -463,6 +466,8 @@ export const createOrder = async (req, res) => {
     );
 
     await transaction.commit();
+
+    // Truy vấn lại order để trả về kết quả chi tiết
     const createdOrder = await Order.findByPk(order.id, {
       include: [
         {
@@ -479,17 +484,25 @@ export const createOrder = async (req, res) => {
           as: 'shippingAddress',
           attributes: ['id', 'full_name', 'address', 'city', 'phone_number'],
         },
-        { model: Delivery },
+        {
+          model: Delivery,
+          as: 'delivery', // ✅ FIXED: thêm alias đúng
+        },
       ],
     });
-
+  
     return res.status(201).json({
       success: true,
       message: 'Đặt hàng thành công',
       data: createdOrder,
     });
+  
   } catch (error) {
-    await transaction.rollback();
+    // ✅ Rollback nếu transaction chưa hoàn tất
+    if (transaction && transaction.finished !== 'commit' && transaction.finished !== 'rollback') {
+      await transaction.rollback();
+    }
+  
     console.error('Error in createOrder:', error);
     return res.status(500).json({
       success: false,
@@ -596,7 +609,9 @@ export const updateOrderStatus = async (req, res) => {
             { model: Variant, attributes: ['id', 'sku'] },
           ],
         },
-        { model: Delivery },
+        { model: Delivery,
+          as: 'delivery',
+         },
         {
           model: User,
           as: 'updatedByUser',
@@ -611,7 +626,14 @@ export const updateOrderStatus = async (req, res) => {
       data: updatedOrder,
     });
   } catch (error) {
-    await transaction.rollback();
+    try {
+      if (transaction && transaction.finished !== 'commit' && transaction.finished !== 'rollback') {
+        await transaction.rollback();
+      }
+    } catch (rollbackError) {
+      console.error('Rollback failed:', rollbackError.message);
+    }
+  
     console.error('Error in updateOrderStatus:', error);
     return res.status(500).json({
       success: false,
